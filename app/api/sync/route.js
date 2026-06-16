@@ -5,21 +5,23 @@ export const maxDuration = 60;
 
 const HUBSPOT_BASE_URL = "https://api.hubapi.com";
 
-function getHubSpotHeaders(hasBody = true) {
-  if (!process.env.HUBSPOT_TOKEN) {
-    throw new Error("HUBSPOT_TOKEN is missing. Add it in .env.local and Vercel Environment Variables.");
+function getHubSpotHeaders(hubspotToken, hasBody = true) {
+  const token = String(hubspotToken || "").trim();
+
+  if (!token) {
+    throw new Error("HubSpot Private App token is required.");
   }
 
-  const headers = { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` };
+  const headers = { Authorization: `Bearer ${token}` };
   if (hasBody) headers["Content-Type"] = "application/json";
   return headers;
 }
 
-async function hubspotRequest(method, path, body = null) {
+async function hubspotRequest(method, path, body = null, hubspotToken) {
   const hasBody = body !== null && body !== undefined;
   const response = await fetch(`${HUBSPOT_BASE_URL}${path}`, {
     method,
-    headers: getHubSpotHeaders(hasBody),
+    headers: getHubSpotHeaders(hubspotToken, hasBody),
     body: hasBody ? JSON.stringify(body) : undefined,
   });
 
@@ -43,7 +45,7 @@ async function hubspotRequest(method, path, body = null) {
   return data;
 }
 
-async function searchObjectByProperty(objectType, propertyName, value, properties = []) {
+async function searchObjectByProperty(objectType, propertyName, value, properties = [], hubspotToken) {
   if (!propertyName || !value) return null;
 
   const data = await hubspotRequest("POST", `/crm/v3/objects/${objectType}/search`, {
@@ -60,17 +62,17 @@ async function searchObjectByProperty(objectType, propertyName, value, propertie
     ],
     properties,
     limit: 1,
-  });
+  }, hubspotToken);
 
   return data?.results?.[0] || null;
 }
 
-async function createObject(objectType, properties) {
-  return hubspotRequest("POST", `/crm/v3/objects/${objectType}`, { properties });
+async function createObject(objectType, properties, hubspotToken) {
+  return hubspotRequest("POST", `/crm/v3/objects/${objectType}`, { properties }, hubspotToken);
 }
 
-async function updateObject(objectType, id, properties) {
-  return hubspotRequest("PATCH", `/crm/v3/objects/${objectType}/${id}`, { properties });
+async function updateObject(objectType, id, properties, hubspotToken) {
+  return hubspotRequest("PATCH", `/crm/v3/objects/${objectType}/${id}`, { properties }, hubspotToken);
 }
 
 function addSummaryError(summary, rowNumber, action, error) {
@@ -87,24 +89,24 @@ function hasAnyValue(properties) {
   return Object.values(properties || {}).some((value) => String(value ?? "").trim() !== "");
 }
 
-async function ensureContact(row, cache, summary) {
+async function ensureContact(row, cache, summary, hubspotToken) {
   const email = row.email;
   if (!email) return null;
 
   if (cache.contacts.has(email)) return cache.contacts.get(email);
 
   try {
-    const existing = await searchObjectByProperty("contacts", "email", email, ["email"]);
+    const existing = await searchObjectByProperty("contacts", "email", email, ["email"], hubspotToken);
 
     if (existing?.id) {
-      const updated = await updateObject("contacts", existing.id, row.contact);
+      const updated = await updateObject("contacts", existing.id, row.contact, hubspotToken);
       const result = { id: updated?.id || existing.id, action: "updated" };
       cache.contacts.set(email, result);
       summary.contacts.updated += 1;
       return result;
     }
 
-    const created = await createObject("contacts", row.contact);
+    const created = await createObject("contacts", row.contact, hubspotToken);
     const result = { id: created.id, action: "created" };
     cache.contacts.set(email, result);
     summary.contacts.created += 1;
@@ -123,7 +125,7 @@ function companyCacheKey(company) {
   return "";
 }
 
-async function ensureCompany(row, cache, summary) {
+async function ensureCompany(row, cache, summary, hubspotToken) {
   if (!hasAnyValue(row.company)) return null;
 
   const key = companyCacheKey(row.company);
@@ -139,22 +141,22 @@ async function ensureCompany(row, cache, summary) {
     let existing = null;
 
     if (row.company.domain) {
-      existing = await searchObjectByProperty("companies", "domain", row.company.domain, ["name", "domain"]);
+      existing = await searchObjectByProperty("companies", "domain", row.company.domain, ["name", "domain"], hubspotToken);
     }
 
     if (!existing?.id && row.company.name) {
-      existing = await searchObjectByProperty("companies", "name", row.company.name, ["name", "domain"]);
+      existing = await searchObjectByProperty("companies", "name", row.company.name, ["name", "domain"], hubspotToken);
     }
 
     if (existing?.id) {
-      const updated = await updateObject("companies", existing.id, row.company);
+      const updated = await updateObject("companies", existing.id, row.company, hubspotToken);
       const result = { id: updated?.id || existing.id, action: "updated" };
       cache.companies.set(key, result);
       summary.companies.updated += 1;
       return result;
     }
 
-    const created = await createObject("companies", row.company);
+    const created = await createObject("companies", row.company, hubspotToken);
     const result = { id: created.id, action: "created" };
     cache.companies.set(key, result);
     summary.companies.created += 1;
@@ -174,7 +176,7 @@ function buildDealProperties(row, settings) {
   return deal;
 }
 
-async function ensureDeal(row, cache, summary, settings) {
+async function ensureDeal(row, cache, summary, settings, hubspotToken) {
   const dealProperties = buildDealProperties(row, settings);
   const uniqueProperty = String(settings.dealUniqueProperty || "external_deal_id").trim();
   const uniqueValue = uniqueProperty ? String(dealProperties[uniqueProperty] || "").trim() : "";
@@ -194,18 +196,18 @@ async function ensureDeal(row, cache, summary, settings) {
     let existing = null;
 
     if (uniqueProperty && uniqueValue) {
-      existing = await searchObjectByProperty("deals", uniqueProperty, uniqueValue, ["dealname", uniqueProperty]);
+      existing = await searchObjectByProperty("deals", uniqueProperty, uniqueValue, ["dealname", uniqueProperty], hubspotToken);
     }
 
     if (existing?.id) {
-      const updated = await updateObject("deals", existing.id, dealProperties);
+      const updated = await updateObject("deals", existing.id, dealProperties, hubspotToken);
       const result = { id: updated?.id || existing.id, action: "updated" };
       cache.deals.set(cacheKey, result);
       summary.deals.updated += 1;
       return result;
     }
 
-    const created = await createObject("deals", dealProperties);
+    const created = await createObject("deals", dealProperties, hubspotToken);
     const result = { id: created.id, action: "created" };
     cache.deals.set(cacheKey, result);
     summary.deals.created += 1;
@@ -216,19 +218,20 @@ async function ensureDeal(row, cache, summary, settings) {
   }
 }
 
-async function associateObjects(fromType, fromId, toType, toId, associationType) {
+async function associateObjects(fromType, fromId, toType, toId, associationType, hubspotToken) {
   return hubspotRequest(
     "PUT",
     `/crm/v3/objects/${fromType}/${fromId}/associations/${toType}/${toId}/${associationType}`,
-    null
+    null,
+    hubspotToken
   );
 }
 
-async function safelyAssociate(summary, rowNumber, key, fromType, fromId, toType, toId, associationType) {
+async function safelyAssociate(summary, rowNumber, key, fromType, fromId, toType, toId, associationType, hubspotToken) {
   if (!fromId || !toId) return;
 
   try {
-    await associateObjects(fromType, fromId, toType, toId, associationType);
+    await associateObjects(fromType, fromId, toType, toId, associationType, hubspotToken);
     summary.associations[key] += 1;
   } catch (error) {
     summary.associations.errors.push({
@@ -252,20 +255,17 @@ function createSummary() {
 
 export async function POST(req) {
   try {
-    const adminKey = process.env.ADMIN_SYNC_KEY;
-    if (adminKey) {
-      const providedKey = req.headers.get("x-admin-sync-key");
-      if (providedKey !== adminKey) {
-        return Response.json({ success: false, error: "Invalid admin sync key." }, { status: 401 });
-      }
-    }
-
     const formData = await req.formData();
     const file = formData.get("file");
     const mappingRaw = formData.get("mapping");
     const customMappingsRaw = formData.get("customMappings");
     const selectionRaw = formData.get("selection");
     const settingsRaw = formData.get("settings");
+    const hubspotToken = String(formData.get("hubspotToken") || "").trim();
+
+    if (!hubspotToken) {
+      return Response.json({ success: false, error: "HubSpot Private App token is required." }, { status: 400 });
+    }
 
     if (!file || typeof file.text !== "function") {
       return Response.json({ success: false, error: "CSV file is required." }, { status: 400 });
@@ -319,17 +319,17 @@ export async function POST(req) {
       let dealResult = null;
 
       if (selection.contact !== false) {
-        contactResult = await ensureContact(row, cache, summary);
+        contactResult = await ensureContact(row, cache, summary, hubspotToken);
         rowResult.contact = contactResult || "failed/skipped";
       }
 
       if (selection.company !== false) {
-        companyResult = await ensureCompany(row, cache, summary);
+        companyResult = await ensureCompany(row, cache, summary, hubspotToken);
         rowResult.company = companyResult || "skipped";
       }
 
       if (selection.deal !== false) {
-        dealResult = await ensureDeal(row, cache, summary, settings);
+        dealResult = await ensureDeal(row, cache, summary, settings, hubspotToken);
         rowResult.deal = dealResult || "skipped";
       }
 
@@ -342,7 +342,8 @@ export async function POST(req) {
           contactResult?.id,
           "companies",
           companyResult?.id,
-          "contact_to_company"
+          "contact_to_company",
+          hubspotToken
         );
 
         await safelyAssociate(
@@ -353,7 +354,8 @@ export async function POST(req) {
           contactResult?.id,
           "deals",
           dealResult?.id,
-          "contact_to_deal"
+          "contact_to_deal",
+          hubspotToken
         );
 
         await safelyAssociate(
@@ -364,7 +366,8 @@ export async function POST(req) {
           companyResult?.id,
           "deals",
           dealResult?.id,
-          "company_to_deal"
+          "company_to_deal",
+          hubspotToken
         );
       }
 

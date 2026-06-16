@@ -57,8 +57,9 @@ The app reads the CSV headings, lets the user map those columns to HubSpot conta
 
 ### Security / Deployment
 
-- HubSpot token stays server-side only
-- Optional `ADMIN_SYNC_KEY` protection
+- HubSpot Private App token is entered manually before each sync
+- Token is sent only with the current sync request and is not stored in the app
+- `ADMIN_SYNC_KEY` has been removed
 - Vercel-ready deployment
 
 ---
@@ -93,16 +94,11 @@ hubspot-csv-vercel/
 npm install
 ```
 
-### 2. Create environment file
+### 2. Environment file
 
-Copy `.env.example` to `.env.local`:
+No `.env.local` file is required in this version.
 
-```env
-HUBSPOT_TOKEN=pat-na1-your_private_app_token_here
-ADMIN_SYNC_KEY=
-```
-
-`ADMIN_SYNC_KEY` is optional. If you set it, users must enter the same key in the UI before syncing.
+The HubSpot Private App token is entered manually in the browser before clicking **Sync**.
 
 ### 3. Run locally
 
@@ -214,19 +210,9 @@ git push -u origin main
 1. Go to Vercel Dashboard
 2. Click **New Project**
 3. Import your GitHub repository
-4. Add Environment Variable:
-
-```txt
-HUBSPOT_TOKEN = your_private_app_token
-```
-
-Optional:
-
-```txt
-ADMIN_SYNC_KEY = your_secret_key
-```
-
+4. No HubSpot environment variable is required.
 5. Click **Deploy**
+6. Open the live URL and paste your HubSpot Private App token in the token input before syncing.
 
 ---
 
@@ -239,7 +225,9 @@ Browser detects headings and previews rows
   ↓
 User maps CSV columns to HubSpot Contact / Company / Deal properties
   ↓
-/api/sync receives CSV + mapping
+User enters HubSpot Private App token manually
+  ↓
+/api/sync receives CSV + mapping + token for this request only
   ↓
 Server validates and cleans rows
   ↓
@@ -280,6 +268,7 @@ mapping = JSON object
 customMappings = JSON array
 selection = JSON object
 settings = JSON object
+hubspotToken = HubSpot Private App token for this request
 ```
 
 ---

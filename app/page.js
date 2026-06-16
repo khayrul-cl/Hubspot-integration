@@ -51,7 +51,7 @@ export default function Home() {
     defaultDealstage: "",
     dealUniqueProperty: "external_deal_id",
   });
-  const [adminKey, setAdminKey] = useState("");
+  const [hubspotToken, setHubspotToken] = useState("");
   const [status, setStatus] = useState(null);
   const [syncing, setSyncing] = useState(false);
 
@@ -139,6 +139,11 @@ export default function Home() {
       return;
     }
 
+    if (!hubspotToken.trim()) {
+      setStatus({ type: "error", message: "HubSpot Private App token is required before syncing." });
+      return;
+    }
+
     setSyncing(true);
     setStatus({ type: "info", message: "Sync started. Please wait; HubSpot API calls may take a moment." });
 
@@ -149,10 +154,10 @@ export default function Home() {
       formData.append("customMappings", JSON.stringify(customMappings));
       formData.append("selection", JSON.stringify(selection));
       formData.append("settings", JSON.stringify(settings));
+      formData.append("hubspotToken", hubspotToken.trim());
 
       const response = await fetch("/api/sync", {
         method: "POST",
-        headers: adminKey ? { "x-admin-sync-key": adminKey } : undefined,
         body: formData,
       });
 
@@ -423,12 +428,19 @@ export default function Home() {
               </p>
               <input
                 className="adminInput"
-                placeholder="Optional admin sync key, if ADMIN_SYNC_KEY is enabled"
-                value={adminKey}
-                onChange={(e) => setAdminKey(e.target.value)}
+                type="password"
+                autoComplete="off"
+                placeholder="Paste HubSpot Private App token here (required)"
+                value={hubspotToken}
+                onChange={(e) => setHubspotToken(e.target.value)}
               />
+              <small className="helperText">
+                <div>
+                  <i>Token is sent only with this sync request and is not stored in the app.</i>
+                </div>
+              </small>
             </div>
-            <button className="primaryButton" disabled={syncing || !prepared.rows.length || (selection.contact && !mapping?.contact?.email)} onClick={handleSync}>
+            <button className="primaryButton" disabled={syncing || !prepared.rows.length || !hubspotToken.trim() || (selection.contact && !mapping?.contact?.email)} onClick={handleSync}>
               {syncing ? "Syncing..." : "Sync valid CRM rows to HubSpot"}
             </button>
           </section>
